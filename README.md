@@ -1,41 +1,50 @@
-# Ir-sensor-IOT-ESP-32-ESP-IDF-
-Setup ESP 32 run IOT thingspeak code using Espressif IDE
+# ESP32 IR Sensor ThingSpeak (ESP-IDF)
 
-# ESP32 IR Sensor → Thingspeak
+Setup ESP32 with ESP-IDF to read an activeâ€‘low IR sensor and send data
+to ThingSpeak every 20 seconds.
+
+------------------------------------------------------------------------
 
 ## Deskripsi
-Proyek ini menggunakan ESP32 untuk membaca sensor IR aktif-low dan mengirim status deteksi objek ke Thingspeak setiap 20 detik. Data juga ditampilkan di serial monitor untuk keperluan debugging.
 
-**Fitur:**
-- ESP32 sebagai WiFi client
-- HTTP GET request ke Thingspeak
-- Deteksi objek dengan IR sensor (active-low)
-- Logging status sensor di serial monitor
+Proyek ini menggunakan ESP32 untuk membaca sensor IR (active-low) dan
+mengirim status deteksi objek ke ThingSpeak. Status sensor juga dicetak
+ke serial monitor untuk debugging.
 
----
+### Fitur:
+
+-   ESP32 sebagai WiFi client\
+-   HTTP GET request ke ThingSpeak\
+-   Deteksi objek via IR sensor (0 = detected, 1 = no object)\
+-   Logging realtime di serial monitor
+
+------------------------------------------------------------------------
 
 ## Wiring
-| Komponen     | ESP32 Pin |
-|--------------|-----------|
-| IR Sensor VCC| 3.3V      |
-| IR Sensor GND| GND       |
-| IR Sensor OUT| GPIO 4    |
 
-> Catatan: Sesuaikan pin dengan wiring kamu.
+  Komponen        ESP32 Pin
+  --------------- -----------
+  IR Sensor VCC   3.3V
+  IR Sensor GND   GND
+  IR Sensor OUT   GPIO 4
 
----
+> Pastikan pin OUT sesuai dengan koneksi di hardware kamu.
 
-## Cara Compile & Upload
+------------------------------------------------------------------------
 
-### ESP-IDF
-```bash
+## Compile & Upload (ESP-IDF)
+
+``` bash
 idf.py set-target esp32
 idf.py build
 idf.py flash monitor
+```
 
-// c code for espressif IDE
+------------------------------------------------------------------------
 
+## C Code --- ESP-IDF (IR Sensor â†’ ThingSpeak)
 
+``` c
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -56,68 +65,68 @@ idf.py flash monitor
 static const char *TAG = "APP";
 
 void send_to_thingspeak(int value) {
-char url[200];
-sprintf(url, "%s?api_key=%s&field1=%d", WRITE_URL, API_KEY, value);
+    char url[200];
+    sprintf(url, "%s?api_key=%s&field1=%d", WRITE_URL, API_KEY, value);
 
-esp_http_client_config_t config = {  
-    .url = url,  
-};  
+    esp_http_client_config_t config = {
+        .url = url,
+    };
 
-esp_http_client_handle_t client = esp_http_client_init(&config);  
-esp_http_client_perform(client);  
-esp_http_client_cleanup(client);  
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_http_client_perform(client);
+    esp_http_client_cleanup(client);
 
-ESP_LOGI(TAG, "Sent to Thingspeak: %d", value);
-
+    ESP_LOGI(TAG, "Sent to Thingspeak: %d", value);
 }
 
 void wifi_init() {
-ESP_LOGI(TAG, "Init NVS");
-nvs_flash_init();
+    ESP_LOGI(TAG, "Init NVS");
+    nvs_flash_init();
 
-esp_netif_init();  
-esp_event_loop_create_default();  
-esp_netif_create_default_wifi_sta();  
+    esp_netif_init();
+    esp_event_loop_create_default();
+    esp_netif_create_default_wifi_sta();
 
-wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();  
-esp_wifi_init(&cfg);  
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
 
-wifi_config_t wifi_config = {  
-    .sta = {  
-        .ssid = WIFI_SSID,  
-        .password = WIFI_PASS,  
-    },  
-};  
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASS,
+        },
+    };
 
-esp_wifi_set_mode(WIFI_MODE_STA);  
-esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);  
-esp_wifi_start();  
-esp_wifi_connect();
-
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
+    esp_wifi_start();
+    esp_wifi_connect();
 }
 
 void app_main() {
-wifi_init();
+    wifi_init();
 
-gpio_config_t io = {  
-    .pin_bit_mask = 1ULL << IR_PIN,  
-    .mode = GPIO_MODE_INPUT,  
-    .pull_up_en = GPIO_PULLUP_DISABLE,  
-    .pull_down_en = GPIO_PULLDOWN_DISABLE  
-};  
-gpio_config(&io);  
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << IR_PIN,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE
+    };
+    gpio_config(&io);
 
-while (1) {  
-    int raw = gpio_get_level(IR_PIN);  
+    while (1) {
+        int raw = gpio_get_level(IR_PIN);
 
-    // Active low → 0 = detected, 1 = no object  
-    int detected = (raw == 0) ? 1 : 0;  
+        // Active low: 0 = detected, 1 = no object
+        int detected = (raw == 0) ? 1 : 0;
 
-    ESP_LOGI(TAG, "IR RAW=%d, DETECT=%d", raw, detected);  
+        ESP_LOGI(TAG, "IR RAW=%d, DETECT=%d", raw, detected);
 
-    send_to_thingspeak(detected);  
+        send_to_thingspeak(detected);
 
-    vTaskDelay(20000 / portTICK_PERIOD_MS); // 20 detik  
+        vTaskDelay(20000 / portTICK_PERIOD_MS); // 20 detik
+    }
 }
+```
 
-}
+------------------------------------------------------------------------
