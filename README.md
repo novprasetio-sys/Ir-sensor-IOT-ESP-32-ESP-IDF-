@@ -1,132 +1,197 @@
-# ESP32 IR Sensor ThingSpeak (ESP-IDF)
+# ESP32 Web Server – Kontrol LED via SoftAP  
+**Mode: Access Point (AP) • Web Server • Tombol On/Off**
 
-Setup ESP32 with ESP-IDF to read an activeâ€‘low IR sensor and send data
-to ThingSpeak every 20 seconds.
+Proyek ini membuat **ESP32 menjadi Access Point (WiFi Hotspot)** dan menjalankan **Web Server** sederhana untuk mengontrol LED melalui browser.  
+User tinggal connect ke WiFi yang dibuat ESP32 → buka **192.168.4.1** → tekan tombol ON/OFF.
 
-------------------------------------------------------------------------
+---
 
-## Deskripsi
+## 🚀 Fitur Utama
 
-Proyek ini menggunakan ESP32 untuk membaca sensor IR (active-low) dan
-mengirim status deteksi objek ke ThingSpeak. Status sensor juga dicetak
-ke serial monitor untuk debugging.
+- ESP32 membuat WiFi sendiri (**SoftAP Mode**)
+- Web server HTTP (port 80)
+- UI web sederhana (HTML & CSS)
+- Tombol **NYALAKAN LED** dan **MATIKAN LED**
+- Logging realtime memakai `ESP_LOGI`
+- Redirect otomatis menggunakan **303 See Other**
 
-### Fitur:
+---
 
--   ESP32 sebagai WiFi client\
--   HTTP GET request ke ThingSpeak\
--   Deteksi objek via IR sensor (0 = detected, 1 = no object)\
--   Logging realtime di serial monitor
+## 📡 Konfigurasi WiFi
 
-------------------------------------------------------------------------
+| Parameter | Nilai |
+|----------|-------|
+| SSID     | `ESP32_LED_TOMBOL_FINAL` |
+| Password | `12345678` |
+| IP Akses | `192.168.4.1` |
 
-## Wiring
+---
 
-  Komponen        ESP32 Pin
-  --------------- -----------
-  IR Sensor VCC   3.3V
-  IR Sensor GND   GND
-  IR Sensor OUT   GPIO 4
+## 💡 GPIO Digunakan
 
-> Pastikan pin OUT sesuai dengan koneksi di hardware kamu.
+| Fungsi | GPIO |
+|--------|------|
+| LED Output | GPIO 2 |
 
-------------------------------------------------------------------------
+---
 
-## Compile & Upload (ESP-IDF)
+## 🧪 ESP-IDF Source Code
 
-``` bash
-idf.py set-target esp32
-idf.py build
-idf.py flash monitor
-```
-
-------------------------------------------------------------------------
-
-## C Code --- ESP-IDF (IR Sensor â†’ ThingSpeak)
-
-``` c
+```c
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "nvs_flash.h"
 #include "esp_log.h"
-#include "esp_http_client.h"
+#include "nvs_flash.h"
+#include "esp_http_server.h"
 #include "driver/gpio.h"
 
-#define WIFI_SSID       "WIFI_KAMU"
-#define WIFI_PASS       "PASSWORD_KAMU"
+#define LED_GPIO_PIN        GPIO_NUM_2     
+#define WIFI_SSID           "ESP32_LED_TOMBOL_FINAL"
+#define WIFI_PASS           "12345678"
+#define TAG                 "WEB_LED_SERVER"
 
-#define IR_PIN          4   // ubah sesuai wiring kamu
-#define API_KEY         "APIKEY_THINGSPEAK"
-#define WRITE_URL       "http://api.thingspeak.com/update"
+static int led_state = 0;
 
-static const char *TAG = "APP";
-
-void send_to_thingspeak(int value) {
-    char url[200];
-    sprintf(url, "%s?api_key=%s&field1=%d", WRITE_URL, API_KEY, value);
-
-    esp_http_client_config_t config = {
-        .url = url,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_http_client_perform(client);
-    esp_http_client_cleanup(client);
-
-    ESP_LOGI(TAG, "Sent to Thingspeak: %d", value);
+// Konfigurasi GPIO LED
+void configure_led(void) {
+    gpio_reset_pin(LED_GPIO_PIN);
+    gpio_set_direction(LED_GPIO_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_GPIO_PIN, 0);
 }
 
-void wifi_init() {
-    ESP_LOGI(TAG, "Init NVS");
-    nvs_flash_init();
+// Set status LED
+void set_led_state(int state) {
+    led_state = state;
+    gpio_set_level(LED_GPIO_PIN, state);
+    ESP_LOGI(TAG, "LED diatur ke: %s (GPIO Level: %d)", state ? "ON" : "OFF", state);
+}
 
-    esp_netif_init();
-    esp_event_loop_create_default();
-    esp_netif_create_default_wifi_sta();
+// Template HTML
+const char *HTML_TEMPLATE =
+"<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'><title>ESP32 LED Control</title>"
+"<style>"
+"body{text-align:center; font-family:sans-serif;} "
+".btn{padding: 12px 25px; margin: 10px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; transition: 0.3s;} "
+".on{background-color:#4CAF50; color:white;} "
+".off{background-color:#f44336; color:white;} "
+".status{margin-top:25px; font-size:22px;}"
+"</style>"
+"</head>"
+"<body>"
+"<h1>Kontrol LED ESP32</h1>"
+"<p class='status'>Status LED: <b>%s</b></p>"
+"<p>"
+"<a href='/on'><button class='btn on'>NYALAKAN LED</button></a>"
+"<a href='/off'><button class='btn off'>MATIKAN LED</button></a>"
+"</p>"
+"<p style='font-size:12px; color:gray;'>Akses via: 192.168.4.1</p>"
+"</body></html>";
+
+// Handler halaman utama
+esp_err_t root_get_handler(httpd_req_t *req) {
+    char html_response[1500];
+    ESP_LOGI(TAG, "Permintaan Root (/) diterima.");
+
+    snprintf(html_response, sizeof(html_response),
+             HTML_TEMPLATE,
+             led_state ? "NYALA" : "MATI");
+
+    httpd_resp_send(req, html_response, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// Handler tombol ON/OFF
+esp_err_t command_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Perintah kontrol diterima: %s", req->uri);
+
+    if (strcmp(req->uri, "/on") == 0) {
+        set_led_state(1);
+    } else if (strcmp(req->uri, "/off") == 0) {
+        set_led_state(0);
+    }
+
+    httpd_resp_set_status(req, "303 See Other");
+    httpd_resp_set_hdr(req, "Location", "/");
+    httpd_resp_send(req, NULL, 0);
+
+    return ESP_OK;
+}
+
+// URI router
+static const httpd_uri_t root_uri = {
+    .uri       = "/",
+    .method    = HTTP_GET,
+    .handler   = root_get_handler
+};
+static const httpd_uri_t on_uri = {
+    .uri       = "/on",
+    .method    = HTTP_GET,
+    .handler   = command_handler
+};
+static const httpd_uri_t off_uri = {
+    .uri       = "/off",
+    .method    = HTTP_GET,
+    .handler   = command_handler
+};
+
+// Inisialisasi WiFi SoftAP
+void wifi_init_softap(void) {
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     wifi_config_t wifi_config = {
-        .sta = {
+        .ap = {
             .ssid = WIFI_SSID,
+            .ssid_len = strlen(WIFI_SSID),
             .password = WIFI_PASS,
+            .max_connection = 4,
+            .authmode = WIFI_AUTH_WPA2_PSK
         },
     };
 
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config);
-    esp_wifi_start();
-    esp_wifi_connect();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "AP dimulai. SSID: %s. Akses: http://192.168.4.1", WIFI_SSID);
 }
 
-void app_main() {
-    wifi_init();
+// Start webserver
+httpd_handle_t start_webserver(void) {
+    httpd_handle_t server = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 
-    gpio_config_t io = {
-        .pin_bit_mask = 1ULL << IR_PIN,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE
-    };
-    gpio_config(&io);
-
-    while (1) {
-        int raw = gpio_get_level(IR_PIN);
-
-        // Active low: 0 = detected, 1 = no object
-        int detected = (raw == 0) ? 1 : 0;
-
-        ESP_LOGI(TAG, "IR RAW=%d, DETECT=%d", raw, detected);
-
-        send_to_thingspeak(detected);
-
-        vTaskDelay(20000 / portTICK_PERIOD_MS); // 20 detik
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_register_uri_handler(server, &root_uri);
+        httpd_register_uri_handler(server, &on_uri);
+        httpd_register_uri_handler(server, &off_uri);
+        ESP_LOGI(TAG, "Web Server berjalan.");
     }
+    return server;
 }
-```
 
-------------------------------------------------------------------------
+// Main program
+void app_main(void) {
+    esp_err_t ret = nvs_flash_init();
+
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+
+    ESP_ERROR_CHECK(ret);
+
+    configure_led();
+    set_led_state(0);
+
+    wifi_init_softap();
+    start_webserver();
+}
